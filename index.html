@@ -1,339 +1,167 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Subway Surf: Solid Physics</title>
+    <title>kore (x64)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Verdana', sans-serif; }
-        #ui { position: absolute; top: 20px; left: 20px; color: white; font-weight: bold; text-shadow: 2px 2px 0 #000; font-size: 24px; pointer-events: none; }
-        #msg { position: absolute; top: 50%; width: 100%; text-align: center; color: red; font-size: 40px; display: none; text-shadow: 2px 2px 0 #fff; font-weight: 900; }
-        canvas { display: block; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+        #win32-menubar {
+            position: absolute; top: 0; left: 0; right: 0; height: 30px;
+            background: #ffffff; display: flex; align-items: center;
+            padding: 0 15px; border-bottom: 1px solid #d0d0d0;
+            z-index: 2000; color: #000; font-size: 11px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        /* Hidden by default, styled for Win32 Mobile */
+        #mobile-controls { position: absolute; bottom: 0; left: 0; right: 0; top: 30px; pointer-events: none; z-index: 1000; display: none; }
+        #stick-base { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: #fff; border: 1px solid #707070; box-shadow: 1px 1px #000; pointer-events: auto; }
+        #stick-knob { position: absolute; top: 25px; left: 25px; width: 50px; height: 50px; background: #f0f0f0; border: 1px solid #707070; box-shadow: inset -1px -1px #a0a0a0; }
+        #jump-btn { position: absolute; bottom: 40px; right: 40px; width: 80px; height: 80px; background: #fff; border: 1px solid #707070; box-shadow: 1px 1px #000; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #000; }
     </style>
 </head>
 <body>
-    <div id="ui">SCORE: <span id="score">0</span></div>
-    <div id="msg">CRASHED!</div>
 
-    <script type="importmap">
-        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
-    </script>
+<div id="win32-menubar"><span id="title-string"></span></div>
+<div id="mobile-controls">
+    <div id="stick-base"><div id="stick-knob"></div></div>
+    <div id="jump-btn">JUMP</div>
+</div>
 
-    <script type="module">
-        import * as THREE from 'three';
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
 
-        // --- Configuration ---
-        const LANE_WIDTH = 4;
-        const PLAYER_HEIGHT = 1.5;
-        const TRAIN_WIDTH = 3.2;
-        const TRAIN_HEIGHT = 3.5;
-        const TRAIN_LENGTH = 20;
+<script type="module">
+    import * as THREE from 'three';
+
+    document.getElementById('title-string').textContent = `kore (x64) - ${navigator.userAgent}`;
+
+    const scene = new THREE.Scene();
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 2; skyCanvas.height = 512;
+    const sCtx = skyCanvas.getContext('2d');
+    const grad = sCtx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, '#4584b4'); grad.addColorStop(0.5, '#c8ced8'); grad.addColorStop(1, '#a1a8b3');
+    sCtx.fillStyle = grad; sCtx.fillRect(0, 0, 2, 512);
+    scene.background = new THREE.CanvasTexture(skyCanvas);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // --- CHECKERED BASEPLATE ---
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.canvas.width = 128; ctx.canvas.height = 128;
+    ctx.fillStyle = '#888888'; ctx.fillRect(0,0,64,64); ctx.fillRect(64,64,64,64);
+    ctx.fillStyle = '#444444'; ctx.fillRect(64,0,64,64); ctx.fillRect(0,64,64,64);
+    const checkerTex = new THREE.CanvasTexture(ctx.canvas);
+    checkerTex.wrapS = checkerTex.wrapT = THREE.RepeatWrapping;
+    checkerTex.magFilter = THREE.NearestFilter;
+    checkerTex.repeat.set(20, 20);
+
+    const baseplate = new THREE.Mesh(new THREE.BoxGeometry(40, 0.5, 40), new THREE.MeshStandardMaterial({ map: checkerTex }));
+    scene.add(baseplate, new THREE.AmbientLight(0xffffff, 0.5));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(10, 20, 10); scene.add(sun);
+
+    // --- CHARACTER ---
+    const charGroup = new THREE.Group();
+    const charGeo = new THREE.BoxGeometry(1, 1, 1);
+    const charMesh = new THREE.Mesh(charGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    const outline = new THREE.Mesh(charGeo, new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }));
+    outline.scale.set(1.15, 1.15, 1.15);
+    charGroup.add(charMesh, outline);
+    charGroup.position.set(0, 2, 0);
+    scene.add(charGroup);
+
+    // --- STATE ---
+    let camAngle = 0, camHeight = 5, camDist = 10, velocityY = 0, isPaused = false;
+    const keys = {}, joyPos = { x: 0, y: 0 };
+    let touchData = { isTouching: false, lastX: 0, lastY: 0, lastDist: 0 };
+    const MOVE_SPEED = 0.08; // Lowered speed
+
+    window.addEventListener('blur', () => isPaused = true);
+    window.addEventListener('focus', () => isPaused = false);
+
+    // --- INPUT HANDLERS ---
+    const mobileUI = document.getElementById('mobile-controls');
+    
+    // Seamless mode detection: Show controls only on touch
+    window.addEventListener('touchstart', (e) => {
+        mobileUI.style.display = 'block';
+        if(e.touches.length === 1) {
+            touchData.lastX = e.touches[0].clientX;
+            touchData.lastY = e.touches[0].clientY;
+            touchData.isTouching = true;
+        } else if(e.touches.length === 2) {
+            touchData.lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+        if(isPaused) return;
+        if(e.touches.length === 1 && touchData.isTouching) {
+            if(e.target.closest('#stick-base') || e.target.closest('#jump-btn')) return;
+            camAngle += (e.touches[0].clientX - touchData.lastX) * 0.01;
+            camHeight = Math.max(1, Math.min(15, camHeight - (e.touches[0].clientY - touchData.lastY) * 0.1));
+            touchData.lastX = e.touches[0].clientX;
+            touchData.lastY = e.touches[0].clientY;
+        } else if(e.touches.length === 2) {
+            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            camDist = Math.max(2, Math.min(30, camDist - (dist - touchData.lastDist) * 0.1));
+            touchData.lastDist = dist;
+        }
+    }, { passive: false });
+
+    // Thumbstick & Jump logic
+    document.getElementById('stick-base').addEventListener('touchmove', (e) => {
+        const b = e.currentTarget.getBoundingClientRect();
+        const dx = e.touches[0].clientX - (b.left + 50), dy = e.touches[0].clientY - (b.top + 50);
+        const d = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+        const a = Math.atan2(dy, dx);
+        joyPos.x = (Math.cos(a)*d)/40; joyPos.y = (Math.sin(a)*d)/40;
+        document.getElementById('stick-knob').style.transform = `translate(${joyPos.x*30}px,${joyPos.y*30}px)`;
+    });
+    document.getElementById('stick-base').addEventListener('touchend', () => { joyPos.x = joyPos.y = 0; document.getElementById('stick-knob').style.transform = 'translate(0,0)'; });
+    document.getElementById('jump-btn').addEventListener('touchstart', () => { if(!isPaused) velocityY = 0.3; });
+
+    window.addEventListener('keydown', (e) => { 
+        keys[e.code] = true; 
+        if(e.code === 'Space' && !isPaused) velocityY = 0.3;
+    });
+    window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(isPaused) return;
+
+        // Camera Rotation (Keyboard)
+        if(keys['ArrowLeft']) camAngle -= 0.03;
+        if(keys['ArrowRight']) camAngle += 0.03;
+        if(keys['ArrowUp']) camHeight = Math.min(15, camHeight + 0.1);
+        if(keys['ArrowDown']) camHeight = Math.max(1, camHeight - 0.1);
+        if(keys['KeyI']) camDist = Math.max(2, camDist - 0.2);
+        if(keys['KeyO']) camDist = Math.min(30, camDist + 0.2);
+
+        const fwd = new THREE.Vector3(Math.sin(camAngle), 0, Math.cos(camAngle));
+        const rit = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), fwd);
         
-        // --- State ---
-        let gameActive = true;
-        let score = 0;
-        let speed = 0.6;
-        let lane = 0; // -1, 0, 1
-        let vY = 0;
-        let gravity = 0.025;
-        let playerY = 0; // The visual Y position offset
-        let isJumping = false;
-        let onTrain = false; // Are we currently running on a roof?
-
-        // --- Setup Scene ---
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87CEEB);
-        scene.fog = new THREE.Fog(0x87CEEB, 20, 120);
-
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-        camera.position.set(0, 7, 12);
-        camera.lookAt(0, 2, -10);
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
-
-        // --- Lighting ---
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(ambient);
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(20, 50, 20);
-        sun.castShadow = true;
-        sun.shadow.camera.bottom = -50;
-        sun.shadow.camera.left = -50;
-        sun.shadow.camera.right = 50;
-        sun.shadow.camera.top = 50;
-        scene.add(sun);
-
-        // --- Textures (Procedural) ---
-        function createTexture(color, type) {
-            const cvs = document.createElement('canvas');
-            cvs.width = 128; cvs.height = 128;
-            const ctx = cvs.getContext('2d');
-            ctx.fillStyle = color;
-            ctx.fillRect(0,0,128,128);
-            
-            // Add grunge/details
-            ctx.fillStyle = "rgba(0,0,0,0.2)";
-            if(type === 'grid') {
-                ctx.fillRect(0, 0, 128, 10);
-                ctx.fillRect(0, 0, 10, 128);
-            } else if (type === 'noise') {
-                for(let i=0; i<100; i++) ctx.fillRect(Math.random()*128, Math.random()*128, 4, 4);
-            }
-            
-            return new THREE.CanvasTexture(cvs);
-        }
-
-        const matTrain = new THREE.MeshStandardMaterial({ map: createTexture('#d63031', 'noise'), roughness: 0.2 });
-        const matRamp = new THREE.MeshStandardMaterial({ map: createTexture('#fdcb6e', 'grid') });
-        const matFloor = new THREE.MeshStandardMaterial({ map: createTexture('#2d3436', 'noise'), roughness: 0.8 });
-        const matPlayer = new THREE.MeshStandardMaterial({ color: 0x0984e3 });
-
-        // --- Objects ---
+        let mx = joyPos.x + (keys['KeyD']?1:0) - (keys['KeyA']?1:0);
+        let mz = joyPos.y + (keys['KeyS']?1:0) - (keys['KeyW']?1:0);
         
-        // Floor
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 1000), matFloor);
-        floor.rotation.x = -Math.PI / 2;
-        floor.receiveShadow = true;
-        scene.add(floor);
+        charGroup.position.addScaledVector(fwd, -mz * MOVE_SPEED);
+        charGroup.position.addScaledVector(rit, mx * MOVE_SPEED);
 
-        // Player (Composite Geometry)
-        const playerGroup = new THREE.Group();
-        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1, 4, 8), matPlayer);
-        body.position.y = 1;
-        body.castShadow = true;
-        playerGroup.add(body);
-        scene.add(playerGroup);
+        velocityY -= 0.015;
+        charGroup.position.y += velocityY;
+        if(charGroup.position.y < 0.75) { charGroup.position.y = 0.75; velocityY = 0; }
 
-        // Chaser
-        const chaser = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.2, 4, 8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
-        chaser.position.set(0, 1, 5);
-        scene.add(chaser);
-
-        // Obstacle Arrays
-        let trains = [];
-        let ramps = [];
-
-        // --- Spawning Logic ---
-        function spawnTrain(zPos, laneIdx) {
-            const group = new THREE.Group();
-            
-            // Solid Box for collision logic
-            const geo = new THREE.BoxGeometry(TRAIN_WIDTH, TRAIN_HEIGHT, TRAIN_LENGTH);
-            const mesh = new THREE.Mesh(geo, matTrain);
-            mesh.position.y = TRAIN_HEIGHT / 2;
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            
-            // Add details (Wheels) to make it look cool
-            const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 3.3);
-            const wheelMat = new THREE.MeshStandardMaterial({color:0x111111});
-            const w1 = new THREE.Mesh(wheelGeo, wheelMat); w1.rotation.z = Math.PI/2; w1.position.set(0, 0.5, 5);
-            const w2 = new THREE.Mesh(wheelGeo, wheelMat); w2.rotation.z = Math.PI/2; w2.position.set(0, 0.5, -5);
-            
-            group.add(mesh, w1, w2);
-            group.position.set(laneIdx * LANE_WIDTH, 0, zPos);
-            
-            // Store Metadata for physics
-            group.userData = { 
-                type: 'train', 
-                width: TRAIN_WIDTH, 
-                height: TRAIN_HEIGHT, 
-                length: TRAIN_LENGTH 
-            };
-            
-            scene.add(group);
-            trains.push(group);
-        }
-
-        function spawnRamp(zPos, laneIdx) {
-            const shape = new THREE.Shape();
-            shape.moveTo(-1.5, 0);
-            shape.lineTo(1.5, 0);
-            shape.lineTo(1.5, TRAIN_HEIGHT); // Ramp goes up to train height
-            shape.lineTo(-1.5, TRAIN_HEIGHT);
-            shape.lineTo(-1.5, 0);
-
-            const extrudeSettings = { steps: 1, depth: 8, bevelEnabled: false };
-            const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-            const mesh = new THREE.Mesh(geo, matRamp);
-            
-            mesh.position.set(laneIdx * LANE_WIDTH, 0, zPos); // Start of ramp
-            mesh.rotation.x = Math.PI; // Flip it to slope Up
-            // Extrude creates it backwards on Z, so we adjust rotation
-            mesh.rotation.y = Math.PI; 
-            
-            mesh.userData = { type: 'ramp', height: TRAIN_HEIGHT };
-            scene.add(mesh);
-            ramps.push(mesh);
-        }
-
-        // --- Input ---
-        const handleInput = (key) => {
-            if (!gameActive) return;
-            if (key === 'Left' && lane > -1) lane--;
-            if (key === 'Right' && lane < 1) lane++;
-            if (key === 'Up' && !isJumping) {
-                vY = 0.5; // Jump force
-                isJumping = true;
-            }
-        };
-
-        window.addEventListener('keydown', e => {
-            if(e.key === 'ArrowLeft') handleInput('Left');
-            if(e.key === 'ArrowRight') handleInput('Right');
-            if(e.key === ' ' || e.key === 'ArrowUp') handleInput('Up');
-        });
-
-        let touchStart = 0;
-        window.addEventListener('touchstart', e => touchStart = e.touches[0].clientX);
-        window.addEventListener('touchend', e => {
-            const diff = e.changedTouches[0].clientX - touchStart;
-            if(Math.abs(diff) > 30) handleInput(diff > 0 ? 'Right' : 'Left');
-            else handleInput('Up');
-        });
-
-        // --- Physics Engine ---
-        function updatePhysics() {
-            // Move Player X (Lane switching)
-            playerGroup.position.x = THREE.MathUtils.lerp(playerGroup.position.x, lane * LANE_WIDTH, 0.2);
-
-            // 1. Determine "Ground Level" for the player
-            // By default, ground is 0. If we are above a train, ground is TRAIN_HEIGHT.
-            let groundLevel = 0;
-            let aboveSolid = false;
-
-            // Check Trains
-            trains.forEach(t => {
-                // Collision Bounds (Simple AABB)
-                const dx = Math.abs(t.position.x - playerGroup.position.x);
-                const dz = t.position.z - playerGroup.position.z; // Positive means train is in front (or under)
-                
-                // Are we physically "inside" the train's footprint?
-                // Train Z center is t.position.z. Length is 20. Bounds are [z-10, z+10].
-                // Player Z is 0 (relative to moving world, effectively).
-                
-                // Wait! In this engine, objects move towards player. Player Z is roughly static 0.
-                // Actually, let's keep player Z at 0 and move objects.
-                const zDist = t.position.z; // Distance from player (0)
-                const isOverlappingZ = zDist > -10 && zDist < 10; // Within length
-                const isOverlappingX = dx < 2.0; // Within width
-
-                if (isOverlappingZ && isOverlappingX) {
-                    // We are intersecting the train's footprint.
-                    
-                    // Case A: We are HIGH enough to be on top
-                    // Allow a small buffer (0.5) so you don't clip toes
-                    if (playerGroup.position.y >= TRAIN_HEIGHT - 0.5) {
-                        groundLevel = TRAIN_HEIGHT;
-                        aboveSolid = true;
-                    } 
-                    // Case B: We hit the FRONT or SIDE (Crash)
-                    else {
-                        // Only crash if we are actually touching it physically
-                        if (zDist < 9 && zDist > -9) { 
-                             gameOver();
-                        }
-                    }
-                }
-            });
-
-            // Check Ramps (Ramps just lift you up smoothly)
-            ramps.forEach(r => {
-                // Ramps are positioned at their TOP Z. They extend 8 units back.
-                // Adjust for rotation: mesh is at Z, extends to Z-8.
-                const zDist = r.position.z; 
-                const dx = Math.abs(r.position.x - playerGroup.position.x);
-                
-                if (dx < 2.0 && zDist > 0 && zDist < 8) {
-                    // Simple linear interpolation for ramp height
-                    // 0 at Z=8, Max at Z=0.
-                    const percent = (8 - zDist) / 8; // 0 to 1
-                    const rampHeight = percent * TRAIN_HEIGHT;
-                    if (rampHeight > groundLevel) groundLevel = rampHeight;
-                }
-            });
-
-            // 2. Apply Gravity / Snap to Ground
-            if (playerGroup.position.y > groundLevel) {
-                // Falling
-                playerGroup.position.y += vY;
-                vY -= gravity;
-            } 
-            
-            // 3. Ground Collision
-            if (playerGroup.position.y <= groundLevel) {
-                playerGroup.position.y = groundLevel;
-                vY = 0;
-                isJumping = false;
-            }
-        }
-
-        function gameOver() {
-            gameActive = false;
-            document.getElementById('msg').style.display = 'block';
-            speed = 0;
-        }
-
-        // --- Game Loop ---
-        let frame = 0;
-        function animate() {
-            if(!gameActive) return;
-            requestAnimationFrame(animate);
-            frame++;
-
-            // Spawn Logic
-            if (frame % 60 === 0) {
-                const r = Math.random();
-                // Random Lane
-                const l = Math.floor(Math.random() * 3) - 1; 
-
-                if (r < 0.3) {
-                    // Spawn Ramp + Train combo
-                    spawnRamp(-100, l);
-                    spawnTrain(-108 - (TRAIN_LENGTH/2), l); 
-                } else if (r < 0.6) {
-                    // Just a Train (Jumpable or dodgeable)
-                    spawnTrain(-100, l);
-                }
-            }
-
-            // Move World (Illusion of speed)
-            const moveObj = (arr) => {
-                for (let i = arr.length - 1; i >= 0; i--) {
-                    arr[i].position.z += speed;
-                    if (arr[i].position.z > 20) {
-                        scene.remove(arr[i]);
-                        arr.splice(i, 1);
-                        score++;
-                    }
-                }
-            };
-            moveObj(trains);
-            moveObj(ramps);
-
-            // Update Physics
-            updatePhysics();
-
-            // Chaser Logic
-            chaser.position.x = THREE.MathUtils.lerp(chaser.position.x, playerGroup.position.x, 0.05);
-            chaser.position.y = playerGroup.position.y; // Chaser jumps with you
-
-            document.getElementById('score').innerText = Math.floor(score/10);
-            renderer.render(scene, camera);
-        }
-
-        // Adjust for resizing
-        window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-        });
-
-        animate();
-
-    </script>
+        camera.position.set(charGroup.position.x + Math.sin(camAngle)*camDist, charGroup.position.y + camHeight, charGroup.position.z + Math.cos(camAngle)*camDist);
+        camera.lookAt(charGroup.position);
+        renderer.render(scene, camera);
+    }
+    animate();
+    window.addEventListener('resize', () => { camera.aspect = window.innerWidth/(window.innerHeight-30); camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+</script>
 </body>
 </html>
