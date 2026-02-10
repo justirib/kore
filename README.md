@@ -1,5 +1,7 @@
+<img width="839" height="437" alt="image" src="https://github.com/user-attachments/assets/feb77a04-7b71-48fe-92f4-aed6f7eb9cc1" />
+
 # kore
-kore is a baseplate made with three.js made by gemini.google.com
+kore is a mess-around opensource baseplate made with three.js by google gemini.
 
 # features:
 - touchscreen support
