@@ -1,0 +1,3 @@
+- make kore into a fully fledged engine with an API and custom file type thing!
+- /kore is just showing what the map would look like (in it's blank state)
+- feel free to fork it, just dont distribute it as well, kore! (k-name or ke-name is fine!)
